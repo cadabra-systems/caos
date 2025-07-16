@@ -2,20 +2,22 @@ local ngx = require "ngx"
 local cjson = require "cjson"
 local http = require "resty.http"
 local string = require "caos.string"
+local url = require "caos.url"
 
 local ClickHouse = {}
 
-function ClickHouse:new(hostname, hostport, dbname, username, password, certificate)
+function ClickHouse:new(connection_string)
+	local dsn = url.parse(connection_string or "")
 	local instance =
 	{
 		client = http.new(),
 		session = nil,
-		certificate = certificate or os.getenv('CLICKHOUSE_CERTIFICATE'), -- /Users/danilabagroff/Certificates/RootCA.pem
-		hostname = hostname or os.getenv('CLICKHOUSE_HOSTNAME'), -- c-c9q6krl81lg11s0tkgov.rw.mdb.yandexcloud.net
-		hostport = hostport or tonumber(os.getenv('CLICKHOUSE_HOSTPORT') or "8443"), -- 8443
-		dbname = dbname or os.getenv('CLICKHOUSE_DBNAME'), -- tube1
-		username = username or os.getenv('CLICKHOUSE_USERNAME'), -- cc
-		password = password or os.getenv('CLICKHOUSE_PASSWORD') -- abracadabra
+		certificate = dsn.query.certificate,
+		hostname = dsn.host or "localhost",
+		hostport = dsn.port or 443,
+		dbname = (dsn.path or "/db"):sub(2),
+		username = dsn.user or "anonymous",
+		password = dsn.password or ""
 	}
 	setmetatable(instance, self)
 	self.__index = self
