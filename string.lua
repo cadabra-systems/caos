@@ -34,6 +34,10 @@ function String.isEmpty(input)
 	return input == nil or input == ""
 end
 
+function String.hasPrefix(input, suffix)
+	return string.sub(input, #suffix) == suffix
+end
+
 function String.hasSuffix(input, suffix)
 	return string.sub(input, -#suffix) == suffix
 end
