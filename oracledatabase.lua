@@ -322,4 +322,85 @@ function OracleDatabase:call(name, body)
 	return retval
 end
 
+function OracleDatabase:collect(name, filter, offset, limit)
+	if not name or not self.client then
+		return {error = 1, list = {}, offset = offset or 0, eof = true}
+	end
+	filter = cjson.encode(filter or {})
+
+	local response = {}
+	for i = 1, 10, 1 do
+		local call, error = self.client:request
+		(
+			{
+				method = "POST",
+				path = "/ords/"..self.dbname.."/soda/latest/"..name,
+				headers =
+				{
+					['Host'] = self.hostname,
+					['Content-Type'] = "application/json",
+					['Content-Length'] = filter:len(),
+					['Connection'] = "Keep-Alive",
+					['User-Agent'] = "Caos/0.1",
+					['Authorization'] = "Basic ".. ngx.encode_base64(self.username..":"..self.password)
+				},
+				query =
+				{
+					action = "query",
+					offset = offset,
+					limit = limit
+				},
+				body = filter
+			}
+		)
+		if call then
+			response = call
+			break
+		elseif i > 9 then
+			ngx.log(ngx.ERR, "OracleDatabase request error: ", error or "Unknown")
+			return nil
+		elseif not self:connect() then
+			ngx.log(ngx.INFO, "OracleDatabase reconnect round: ", i)
+		else
+			ngx.log(ngx.INFO, "OracleDatabase reconnected at round: ", i)
+		end
+	end
+	if response.status ~= 200 then
+		ngx.log(ngx.ERR, "OracleDatabase request error: ", response:read_body())
+		return {error = response.status, list = {}, offset = offset or 0, eof = true}
+	elseif response.headers['Content-Type'] ~= "application/json" then
+		return {error = -1, list = {}, offset = offset or 0, eof = true}
+	end
+
+	local retval = {error = 0, list = {}, offset = offset or 0, eof = true}
+
+	local response_body = ""
+	local response_body_reader = response.body_reader
+	repeat
+		local buffer, body_reader_error = response_body_reader(8192)
+		if body_reader_error then
+			ngx.log(ngx.ERR, "OracleDatabase response reader error: ", body_reader_error)
+			retval.error = 3
+			return retval
+		elseif buffer then
+			response_body = response_body .. buffer
+		end
+	until not buffer
+
+	local retcode, error = self.client:set_keepalive()
+	if not retcode or retcode ~= 1 then
+		ngx.log(ngx.INFO, "OracleDatabase keepalive error: ", error or "Unknown")
+		self.client = nil
+		self.session = nil
+	end
+	if not string.isEmpty(response_body) then
+		response_body = cjson.decode(response_body)
+		if response_body then
+			retval.eof = not (response_body.hasMore or false)
+			retval.list = response_body.items
+		end
+	end
+	return retval
+end
+
 return OracleDatabase
