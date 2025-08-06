@@ -5,6 +5,32 @@ local string = require "caos.string"
 local url = require "caos.url"
 
 local OracleDatabase = {}
+OracleDatabase.Condition =
+{
+	Not = "$not",
+	NotEqual = "$ne",
+	Equal = "$eq",
+	GreaterThan = "$gt",
+	GreaterEqualThan = "gte",
+	LessThan = "$lt",
+	LessEqualThan = "$lte",
+	Contains = "$contains",
+	Exists = "$exists",
+	StartsWith = "startsWith",
+	HasSubstring = "$hasSubstring",
+	Like = "$like",
+	Regex = "$regex",
+	AllIn = "$all", -- Whether an array field value contains all of a set of values
+	In = "$in", -- Whether a field value is a member of a given set of scalar values
+	NotIn = "$nin", -- Whether a field value is not a member of a given set of scalar values
+	Between = "$between" -- Whether a field value is between two string or number values (inclusive)
+}
+
+function OracleDatabase.Predicate(condition, value)
+	local retval = {}
+	retval[condition] = value
+	return retval
+end
 
 function OracleDatabase:new(connection_string)
 	local dsn = url.parse(connection_string or "")
