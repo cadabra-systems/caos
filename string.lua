@@ -1,6 +1,10 @@
 
 local String = {}
 
+function String.subString(input, offset, count)
+	return string.sub(input, offset, count)
+end
+
 function String.count(input, pattern)
 	local retval = 0
 	for word in string.gmatch(input, pattern) do
@@ -21,6 +25,15 @@ function String.split(input, delimiter)
 	return retval
 end
 
+function String.findFirst(input, needle)
+	for i = 1, #input - #needle + 1 do
+		if string.sub(input, i, i + #needle - 1) == needle then
+			return i
+		end
+	end
+	return nil
+end
+
 function String.findLast(input, needle)
 	for i = #input - #needle + 1, 1, -1 do
 		if string.sub(input, i, i + #needle - 1) == needle then
@@ -34,8 +47,8 @@ function String.isEmpty(input)
 	return input == nil or input == ""
 end
 
-function String.hasPrefix(input, suffix)
-	return string.sub(input, #suffix) == suffix
+function String.hasPrefix(input, prefix)
+	return string.sub(input, 1, #prefix) == prefix
 end
 
 function String.hasSuffix(input, suffix)
