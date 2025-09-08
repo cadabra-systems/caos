@@ -7,6 +7,8 @@ local url = require "caos.url"
 local OracleDatabase = {}
 OracleDatabase.Condition =
 {
+	Or = "$or",
+	And = "$and",
 	Not = "$not",
 	NotEqual = "$ne",
 	Equal = "$eq",
@@ -182,10 +184,10 @@ function OracleDatabase:query(q, ...)
 		response = response['items'][1]
 		if response['errorCode'] then
 			--errorCode: 911
-            --errorLine: 2
-            --errorColumn: 3
-            --errorMessage: ORA-00911: invalid character after SELECT\n\nhttps://docs.oracle.com/error-help/db/ora-00911/
-            --errorDetails: 00911. 00000 -  \"%s: invalid character after %s\" *Cause:    An invalid character has been encountered in the SQL statement. Action: Remove the invalid character. If it is part of an identifier, enclose the identifier in double quotation marks. Params: 1) character_value 2) token_value: The token after which the invalid character causing the error occurs.
+			--errorLine: 2
+			--errorColumn: 3
+			--errorMessage: ORA-00911: invalid character after SELECT\n\nhttps://docs.oracle.com/error-help/db/ora-00911/
+			--errorDetails: 00911. 00000 -  \"%s: invalid character after %s\" *Cause:    An invalid character has been encountered in the SQL statement. Action: Remove the invalid character. If it is part of an identifier, enclose the identifier in double quotation marks. Params: 1) character_value 2) token_value: The token after which the invalid character causing the error occurs.
 			retval.error = tonumber(response['errorCode'])
 			return retval
 		elseif response['resultSet'] then
@@ -221,9 +223,9 @@ function OracleDatabase:query(q, ...)
 			]
 			,
 			"hasMore": false,
-            "limit": 10000,
-            "offset": 0,
-            "count": 149
+			"limit": 10000,
+			"offset": 0,
+			"count": 149
 --]]
 			retval.rowset = response['resultSet']['items'] or nil
 			if retval.rowset then
@@ -348,12 +350,20 @@ function OracleDatabase:call(name, body)
 	return retval
 end
 
-function OracleDatabase:collect(name, filter, offset, limit)
+function OracleDatabase:collect(name, filter, limit, sort)
 	if not name or not self.client then
-		return {error = 1, list = {}, offset = offset or 0, eof = true}
+		return {error = 1, list = {}, eof = true}
 	end
-	filter = cjson.encode(filter or {})
-
+	local body = {}
+	if filter then
+		body['$query'] = filter
+	end
+	if not sort then
+		body['$orderby'] = {{path = "id", order = "asc"}}
+	else
+		body['$orderby'] = sort
+	end
+	body = cjson.encode(body)
 	local response = {}
 	for i = 1, 10, 1 do
 		local call, error = self.client:request
@@ -365,7 +375,7 @@ function OracleDatabase:collect(name, filter, offset, limit)
 				{
 					['Host'] = self.hostname,
 					['Content-Type'] = "application/json",
-					['Content-Length'] = filter:len(),
+					['Content-Length'] = body:len(),
 					['Connection'] = "Keep-Alive",
 					['User-Agent'] = "Caos/0.1",
 					['Authorization'] = "Basic ".. ngx.encode_base64(self.username..":"..self.password)
@@ -373,10 +383,9 @@ function OracleDatabase:collect(name, filter, offset, limit)
 				query =
 				{
 					action = "query",
-					offset = offset,
 					limit = limit
 				},
-				body = filter
+				body = body
 			}
 		)
 		if call then
@@ -393,12 +402,12 @@ function OracleDatabase:collect(name, filter, offset, limit)
 	end
 	if response.status ~= 200 then
 		ngx.log(ngx.ERR, "OracleDatabase request error: ", response:read_body())
-		return {error = response.status, list = {}, offset = offset or 0, eof = true}
+		return {error = response.status, list = {}, eof = true}
 	elseif response.headers['Content-Type'] ~= "application/json" then
-		return {error = -1, list = {}, offset = offset or 0, eof = true}
+		return {error = -1, list = {}, eof = true}
 	end
 
-	local retval = {error = 0, list = {}, offset = offset or 0, eof = true}
+	local retval = {error = 0, list = {}, eof = true}
 
 	local response_body = ""
 	local response_body_reader = response.body_reader
