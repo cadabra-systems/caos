@@ -18,7 +18,7 @@ OracleDatabase.Condition =
 	LessEqualThan = "$lte",
 	Contains = "$contains",
 	Exists = "$exists",
-	StartsWith = "startsWith",
+	StartsWith = "$startsWith",
 	HasSubstring = "$hasSubstring",
 	Like = "$like",
 	Regex = "$regex",
@@ -350,20 +350,21 @@ function OracleDatabase:call(name, body)
 	return retval
 end
 
-function OracleDatabase:collect(name, filter, limit, sort)
+function OracleDatabase:collect(name, filter, sort, limit)
 	if not name or not self.client then
 		return {error = 1, list = {}, eof = true}
 	end
-	local body = {}
+	local retval = {error = 0, list = {}, eof = true}
+	local offset = nil
+	local request = {}
 	if filter then
-		body['$query'] = filter
+		request['$query'] = filter
 	end
-	if not sort then
-		body['$orderby'] = {{path = "id", order = "asc"}}
-	else
-		body['$orderby'] = sort
+	if sort then
+		request['$orderby'] = sort
 	end
-	body = cjson.encode(body)
+	::loop::
+	local body = cjson.encode(request)
 	local response = {}
 	for i = 1, 10, 1 do
 		local call, error = self.client:request
@@ -383,7 +384,8 @@ function OracleDatabase:collect(name, filter, limit, sort)
 				query =
 				{
 					action = "query",
-					limit = limit
+					limit = limit,
+					offset = offset
 				},
 				body = body
 			}
@@ -406,8 +408,6 @@ function OracleDatabase:collect(name, filter, limit, sort)
 	elseif response.headers['Content-Type'] ~= "application/json" then
 		return {error = -1, list = {}, eof = true}
 	end
-
-	local retval = {error = 0, list = {}, eof = true}
 
 	local response_body = ""
 	local response_body_reader = response.body_reader
@@ -432,7 +432,13 @@ function OracleDatabase:collect(name, filter, limit, sort)
 		response_body = cjson.decode(response_body)
 		if response_body then
 			retval.eof = not (response_body.hasMore or false)
-			retval.list = response_body.items
+			for _, item in ipairs(response_body.items) do
+				table.insert(retval.list, item)
+			end
+			if not retval.eof then
+				offset = #retval.list
+				goto loop
+			end
 		end
 	end
 	return retval
