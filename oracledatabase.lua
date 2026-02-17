@@ -206,8 +206,8 @@ function OracleDatabase:query(q, ...)
 			]
 			,
 			"items":
-            [
-                {
+			[
+				{
 					"id": "lSESTLB5TVSVHpehEZHJ7g==",
 					"content_type": "video/x-cube",
 					"channel": "DrOblozhko",
@@ -350,12 +350,19 @@ function OracleDatabase:call(name, body)
 	return retval
 end
 
-function OracleDatabase:collect(name, filter, sort, limit)
+function OracleDatabase:collect(name, filter, sort, limit, offset)
 	if not name or not self.client then
 		return {error = 1, list = {}, eof = true}
 	end
+	if not limit then
+		limit = 100
+	end
+	local fetch_all = false
+	if not offset then
+		fetch_all = true
+		offset = 0
+	end
 	local retval = {error = 0, list = {}, eof = true}
-	local offset = nil
 	local request = {}
 	if filter then
 		request['$query'] = filter
@@ -384,8 +391,8 @@ function OracleDatabase:collect(name, filter, sort, limit)
 				query =
 				{
 					action = "query",
-					limit = limit,
-					offset = offset
+					limit = tostring(limit),
+					offset = tostring(offset)
 				},
 				body = body
 			}
@@ -435,7 +442,7 @@ function OracleDatabase:collect(name, filter, sort, limit)
 			for _, item in ipairs(response_body.items) do
 				table.insert(retval.list, item)
 			end
-			if not retval.eof then
+			if not retval.eof and fetch_all then
 				offset = #retval.list
 				goto loop
 			end
