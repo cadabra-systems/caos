@@ -48,10 +48,16 @@ function String.isEmpty(input)
 end
 
 function String.hasPrefix(input, prefix)
+	if String.isEmpty(input) or String.isEmpty(prefix) then
+		return false
+	end
 	return string.sub(input, 1, #prefix) == prefix
 end
 
 function String.hasSuffix(input, suffix)
+	if String.isEmpty(input) or String.isEmpty(prefix) then
+		return false
+	end
 	return string.sub(input, -#suffix) == suffix
 end
 
