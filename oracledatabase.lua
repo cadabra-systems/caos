@@ -46,10 +46,10 @@ function OracleDatabase:new(connection_string)
 		dbname = (dsn.path or "/db"):sub(2),
 		username = dsn.user or "anonymous",
 		password = dsn.password or "",
-		connection_timeout = dsn.connection_timeout or 60000,
-		send_timeout = dsn.send_timeout or 60000,
-		read_timeout = dsn.read_timeout or 60000,
-		request_retry = dsn.request_retry or 3
+		connection_timeout = tonumber(dsn.query.connection_timeout) or 60000,
+		send_timeout = tonumber(dsn.query.send_timeout) or 60000,
+		read_timeout = tonumber(dsn.query.read_timeout) or 60000,
+		request_retry = tonumber(dsn.query.request_retry) or 3
 	}
 	setmetatable(instance, self)
 	self.__index = self
