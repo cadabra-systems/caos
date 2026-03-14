@@ -69,18 +69,30 @@ URL.services = {
 }
 
 local function decode(str)
-	return (str:gsub("%%(%x%x)", function(c)
-		return string.char(tonumber(c, 16))
-	end))
+	return (
+			str:gsub
+			(
+				"%%(%x%x)",
+				function(c)
+					return string.char(tonumber(c, 16))
+				end
+			)
+	)
 end
 
 local function encode(str, legal)
-	return (str:gsub("([^%w])", function(v)
-		if legal[v] then
-			return v
-		end
-		return string.upper(string.format("%%%02x", string.byte(v)))
-	end))
+	return (
+			str:gsub
+			(
+				"([^%w])",
+				function(v)
+					if legal[v] then
+						return v
+					end
+					return string.upper(string.format("%%%02x", string.byte(v)))
+				end
+			)
+	)
 end
 
 -- for query values, + can mean space if configured as such
@@ -166,10 +178,14 @@ function URL.buildQuery(tab, sep, key)
 	for k in pairs(tab) do
 		keys[#keys+1] = k
 	end
-	table.sort(keys, function (a, b)
-		local function padnum(n, rest) return ("%03d"..rest):format(tonumber(n)) end
-		return tostring(a):gsub("(%d+)(%.)",padnum) < tostring(b):gsub("(%d+)(%.)",padnum)
-	end)
+	table.sort
+	(
+		keys,
+		function (a, b)
+			local function padnum(n, rest) return ("%03d"..rest):format(tonumber(n)) end
+			return tostring(a):gsub("(%d+)(%.)",padnum) < tostring(b):gsub("(%d+)(%.)",padnum)
+		end
+	)
 	for _,name in ipairs(keys) do
 		local value = tab[name]
 		name = encode(tostring(name), {["-"] = true, ["_"] = true, ["."] = true})
@@ -208,7 +224,7 @@ function URL.parseQuery(str, sep)
 
 	local values = {}
 	for key,val in str:gmatch(string.format('([^%s=]+)(=*[^%s]*)', sep, sep)) do
-		local key = decodeValue(key)
+		key = decodeValue(key)
 		local keys = {}
 		key = key:gsub('%[([^%]]*)%]', function(v)
 				-- extract keys between balanced brackets
@@ -263,7 +279,6 @@ end
 -- @param query Can be a string to parse or a table of key/value pairs
 -- @return a table representing the query key/value pairs
 function URL:setQuery(query)
-	local query = query
 	if type(query) == 'table' then
 		query = URL.buildQuery(query)
 	end
@@ -364,7 +379,7 @@ function URL.parse(url)
 	URL.setAuthority(comp, "")
 	URL.setQuery(comp, "")
 
-	local url = tostring(url or '')
+	url = tostring(url or "")
 	url = url:gsub('#(.*)$', function(v)
 		comp.fragment = v
 		return ''
@@ -384,12 +399,15 @@ function URL.parse(url)
 
 	comp.path = url:gsub("([^/]+)", function (s) return encode(decode(s), URL.options.legal_in_path) end)
 
-	setmetatable(comp, {
-		__index = URL,
-		__tostring = URL.build,
-		__concat = concat,
-		__div = URL.addSegment
-	})
+	setmetatable(
+					comp,
+					{
+						__index = URL,
+						__tostring = URL.build,
+						__concat = concat,
+						__div = URL.addSegment
+					}
+	)
 	return comp
 end
 
@@ -416,7 +434,7 @@ function URL.removeDotSegments(path)
 	local new = {}
 	local j = 0
 
-	for i,c in ipairs(fields) do
+	for i, c in ipairs(fields) do
 		if c == '..' then
 			if j > 0 then
 				j = j - 1
