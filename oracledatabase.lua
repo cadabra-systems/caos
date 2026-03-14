@@ -45,7 +45,11 @@ function OracleDatabase:new(connection_string)
 		hostport = dsn.port or 443,
 		dbname = (dsn.path or "/db"):sub(2),
 		username = dsn.user or "anonymous",
-		password = dsn.password or ""
+		password = dsn.password or "",
+		connection_timeout = dsn.connection_timeout or 60000,
+		send_timeout = dsn.send_timeout or 60000,
+		read_timeout = dsn.read_timeout or 60000,
+		request_retry = dsn.request_retry or 3
 	}
 	setmetatable(instance, self)
 	self.__index = self
@@ -58,7 +62,9 @@ function OracleDatabase:connect()
 	else
 		self:disconnect()
 	end
-	-- @todo timeout?
+
+	self.client:set_timeouts(self.connection_timeout, self.send_timeout, self.read_timeout)
+
 	local retcode, error, session = self.client:connect
 	(
 		{
@@ -102,7 +108,7 @@ function OracleDatabase:query(q, ...)
 	end
 
 	local response = {}
-	for i = 1, 10, 1 do
+	for i = 1, 1 + self.request_retry, 1 do
 		local call, error = self.client:request
 		(
 			{
@@ -126,13 +132,16 @@ function OracleDatabase:query(q, ...)
 		if call then
 			response = call
 			break
-		elseif i > 9 then
+		elseif i > self.request_retry then
 			ngx.log(ngx.ERR, "OracleDatabase request error: ", error or "Unknown")
 			return {error = 2, selected_rows = 0, read_rows = 0, affected_rows = 0}
-		elseif not self:connect() then
-			ngx.log(ngx.INFO, "OracleDatabase reconnect round: ", i)
 		else
-			ngx.log(ngx.INFO, "OracleDatabase reconnected at round: ", i)
+			ngx.log(ngx.WARN, "OracleDatabase request failed (attempt ", i, "): ", error or "Unknown")
+			if not self:connect() then
+				ngx.log(ngx.INFO, "OracleDatabase reconnect round: ", i)
+			else
+				ngx.log(ngx.INFO, "OracleDatabase reconnected at round: ", i)
+			end
 		end
 	end
 	ngx.log(ngx.DEBUG, "OracleDatabase query q: ", q:gsub("[\n\r]", " "), "; status: ", response.status, "; id: ", response.headers['X-OracleDatabase-Query-Id'] or "none")
@@ -273,7 +282,7 @@ function OracleDatabase:call(name, body)
 	body = cjson.encode(body or {})
 
 	local response = {}
-	for i = 1, 10, 1 do
+	for i = 1, 1 + self.request_retry, 1 do
 		local call, error = self.client:request
 		(
 			{
@@ -297,13 +306,16 @@ function OracleDatabase:call(name, body)
 		if call then
 			response = call
 			break
-		elseif i > 9 then
+		elseif i > self.request_retry then
 			ngx.log(ngx.ERR, "OracleDatabase request error: ", error or "Unknown")
 			return nil
-		elseif not self:connect() then
-			ngx.log(ngx.INFO, "OracleDatabase reconnect round: ", i)
 		else
-			ngx.log(ngx.INFO, "OracleDatabase reconnected at round: ", i)
+			ngx.log(ngx.WARN, "OracleDatabase request failed (attempt ", i, "): ", error or "Unknown")
+			if not self:connect() then
+				ngx.log(ngx.INFO, "OracleDatabase reconnect round: ", i)
+			else
+				ngx.log(ngx.INFO, "OracleDatabase reconnected at round: ", i)
+			end
 		end
 	end
 	if response.status ~= 200 then
@@ -373,7 +385,7 @@ function OracleDatabase:collect(name, filter, sort, limit, offset)
 	::loop::
 	local body = cjson.encode(request)
 	local response = {}
-	for i = 1, 10, 1 do
+	for i = 1, 1 + self.request_retry, 1 do
 		local call, error = self.client:request
 		(
 			{
@@ -400,13 +412,16 @@ function OracleDatabase:collect(name, filter, sort, limit, offset)
 		if call then
 			response = call
 			break
-		elseif i > 9 then
+		elseif i > self.request_retry then
 			ngx.log(ngx.ERR, "OracleDatabase request error: ", error or "Unknown")
 			return nil
-		elseif not self:connect() then
-			ngx.log(ngx.INFO, "OracleDatabase reconnect round: ", i)
 		else
-			ngx.log(ngx.INFO, "OracleDatabase reconnected at round: ", i)
+			ngx.log(ngx.WARN, "OracleDatabase request failed (attempt ", i, "): ", error or "Unknown")
+			if not self:connect() then
+				ngx.log(ngx.INFO, "OracleDatabase reconnect round: ", i)
+			else
+				ngx.log(ngx.INFO, "OracleDatabase reconnected at round: ", i)
+			end
 		end
 	end
 	if response.status ~= 200 then
