@@ -49,7 +49,9 @@ function OracleDatabase:new(connection_string)
 		connection_timeout = tonumber(dsn.query.connection_timeout) or 60000,
 		send_timeout = tonumber(dsn.query.send_timeout) or 60000,
 		read_timeout = tonumber(dsn.query.read_timeout) or 60000,
-		request_retry = tonumber(dsn.query.request_retry) or 3
+		request_retry = tonumber(dsn.query.request_retry) or 3,
+		http_proxy = dsn.query.http_proxy or nil,
+		https_proxy = dsn.query.https_proxy or nil
 	}
 	setmetatable(instance, self)
 	self.__index = self
@@ -71,7 +73,11 @@ function OracleDatabase:connect()
 			scheme = "https",
 			host = self.hostname,
 			port = self.hostport,
-			ssl_verify = false
+			ssl_verify = false,
+			proxy_opts = {
+				http_proxy = self.http_proxy or nil,
+				https_proxy = self.https_proxy or nil
+			}
 		}
 	)
 	if not retcode or error then
@@ -87,12 +93,30 @@ function OracleDatabase:disconnect()
 	if not self.client then
 		return false
 	end
-	return self.client:close()
+	local retval = self.client:close()
+	self.session = nil
+	return retval
+end
+
+function OracleDatabase:reconnect(force)
+	if not self.client then
+		return false
+	elseif self.session and not (force or false) then
+		return true
+	end
+	for i = 1, 1 + self.request_retry, 1 do
+		if self:connect() then
+			return true
+		end
+	end
+	return false
 end
 
 function OracleDatabase:query(q, ...)
 	if not self.client then
-		return {error = 1, selected_rows = 0, read_rows = 0, affected_rows = 0, rowset = nil}
+		return { error = 1, selected_rows = 0, read_rows = 0, affected_rows = 0, rowset = nil }
+	elseif not self:reconnect(false) then
+		return { error = 1, selected_rows = 0, read_rows = 0, affected_rows = 0, rowset = nil }
 	end
 
 	q = string.trim(q)
@@ -110,31 +134,31 @@ function OracleDatabase:query(q, ...)
 	local response = {}
 	for i = 1, 1 + self.request_retry, 1 do
 		local call, error = self.client:request
-		(
-			{
-				method = "POST",
-				path = "/ords/"..self.dbname.."/_/sql",
-				headers =
+			(
 				{
-					['Host'] = self.hostname,
-					['Content-Type'] = "application/sql",
-					['Content-Length'] = q:len(),
-					['Connection'] = "Keep-Alive",
-					['User-Agent'] = "Caos/0.1",
-					['Authorization'] = "Basic ".. ngx.encode_base64(self.username..":"..self.password)
-				},
-				query =
-				{
-				},
-				body = q
-			}
-		)
+					method = "POST",
+					path = "/ords/" .. self.dbname .. "/_/sql",
+					headers =
+					{
+						['Host'] = self.hostname,
+						['Content-Type'] = "application/sql",
+						['Content-Length'] = q:len(),
+						['Connection'] = "Keep-Alive",
+						['User-Agent'] = "Caos/0.1",
+						['Authorization'] = "Basic " .. ngx.encode_base64(self.username .. ":" .. self.password)
+					},
+					query =
+					{
+					},
+					body = q
+				}
+			)
 		if call then
 			response = call
 			break
 		elseif i > self.request_retry then
 			ngx.log(ngx.ERR, "OracleDatabase request error: ", error or "Unknown")
-			return {error = 2, selected_rows = 0, read_rows = 0, affected_rows = 0}
+			return { error = 2, selected_rows = 0, read_rows = 0, affected_rows = 0 }
 		else
 			ngx.log(ngx.WARN, "OracleDatabase request failed (attempt ", i, "): ", error or "Unknown")
 			if not self:connect() then
@@ -144,12 +168,29 @@ function OracleDatabase:query(q, ...)
 			end
 		end
 	end
-	ngx.log(ngx.DEBUG, "OracleDatabase query q: ", q:gsub("[\n\r]", " "), "; status: ", response.status, "; id: ", response.headers['X-OracleDatabase-Query-Id'] or "none")
+
+	local need_close = true
+	if response and response.headers then
+		for key, value in pairs(response.headers) do
+			if type(key) == "string" and key:lower() == "connection" then
+				need_close = (tostring(value):lower() ~= "keep-alive")
+				break
+			end
+		end
+	end
+
+	ngx.log(ngx.DEBUG, "OracleDatabase query: ", q:gsub("[\n\r]", " "), "; status: ", response.status, "; id: ", response.headers['X-OracleDatabase-Query-Id'] or "none")
 	if response.status ~= 200 then
 		ngx.log(ngx.ERR, "OracleDatabase query error: ", response:read_body())
+		if need_close then
+			self:disconnect()
+		end
 		return {error = -1, selected_rows = 0, read_rows = 0, affected_rows = 0, rowset = nil}
 	elseif response.headers['Content-Type'] ~= "application/json" then
 		ngx.log(ngx.ERR, "OracleDatabase query response unexpected content type: ", response.headers['Content-Type'])
+		if need_close then
+			self:disconnect()
+		end
 		return {error = -1, selected_rows = 0, read_rows = 0, affected_rows = 0, rowset = nil}
 	end
 
@@ -170,17 +211,16 @@ function OracleDatabase:query(q, ...)
 		if body_reader_error then
 			ngx.log(ngx.ERR, "OracleDatabase response reader error: ", body_reader_error)
 			retval.error = 3
+			if need_close then
+				self:disconnect()
+			end
 			return retval
 		elseif buffer then
 			response_body = response_body .. buffer
 		end
 	until not buffer
-
-	local retcode, error = self.client:set_keepalive()
-	if not retcode or retcode ~= 1 then
-		ngx.log(ngx.INFO, "OracleDatabase keepalive error: ", error or "Unknown")
-		self.client = nil
-		self.session = nil
+	if need_close then
+		self:disconnect()
 	end
 
 	if not string.isEmpty(response_body) then
@@ -277,17 +317,19 @@ end
 
 function OracleDatabase:call(name, body)
 	if not name or not self.client then
-		return {error = 1, body = {}}
+		return { error = 1, body = {} }
+	elseif not self:reconnect(false) then
+		return { error = 1, body = {} }
 	end
-	body = cjson.encode(body or {})
 
+	body = cjson.encode(body or {})
 	local response = {}
 	for i = 1, 1 + self.request_retry, 1 do
 		local call, error = self.client:request
 		(
 			{
 				method = "POST",
-				path = "/ords/"..self.dbname.."/"..name,
+				path = "/ords/" .. self.dbname .. "/" .. name,
 				headers =
 				{
 					['Host'] = self.hostname,
@@ -295,7 +337,7 @@ function OracleDatabase:call(name, body)
 					['Content-Length'] = body:len(),
 					['Connection'] = "Keep-Alive",
 					['User-Agent'] = "Caos/0.1",
-					['Authorization'] = "Basic ".. ngx.encode_base64(self.username..":"..self.password)
+					['Authorization'] = "Basic " .. ngx.encode_base64(self.username .. ":" .. self.password)
 				},
 				query =
 				{
@@ -318,10 +360,27 @@ function OracleDatabase:call(name, body)
 			end
 		end
 	end
+
+	local need_close = true
+	if response and response.headers then
+		for key, value in pairs(response.headers) do
+			if type(key) == "string" and key:lower() == "connection" then
+				need_close = (tostring(value):lower() ~= "keep-alive")
+				break
+			end
+		end
+	end
+
 	if response.status ~= 200 then
 		ngx.log(ngx.ERR, "OracleDatabase request error: ", response:read_body())
+		if need_close then
+			self:disconnect()
+		end
 		return {error = response.status, body = {}}
 	elseif response.headers['Content-Type'] ~= "application/json" then
+		if need_close then
+			self:disconnect()
+		end
 		return {error = -1, body = {}}
 	end
 
@@ -334,18 +393,18 @@ function OracleDatabase:call(name, body)
 		if body_reader_error then
 			ngx.log(ngx.ERR, "OracleDatabase response reader error: ", body_reader_error)
 			retval.error = 3
+			if need_close then
+				self:disconnect()
+			end
 			return retval
 		elseif buffer then
 			response_body = response_body .. buffer
 		end
 	until not buffer
-
-	local retcode, error = self.client:set_keepalive()
-	if not retcode or retcode ~= 1 then
-		ngx.log(ngx.INFO, "OracleDatabase keepalive error: ", error or "Unknown")
-		self.client = nil
-		self.session = nil
+	if need_close then
+		self:disconnect()
 	end
+
 	if not string.isEmpty(response_body) then
 		retval.body = cjson.decode(response_body)
 		if retval.body then
@@ -364,8 +423,11 @@ end
 
 function OracleDatabase:collect(name, filter, sort, limit, offset)
 	if not name or not self.client then
-		return {error = 1, list = {}, eof = true}
+		return { error = 1, list = {}, eof = true }
+	elseif not self:reconnect(false) then
+		return { error = 1, list = {}, eof = true }
 	end
+
 	if not limit then
 		limit = 100
 	end
@@ -424,10 +486,27 @@ function OracleDatabase:collect(name, filter, sort, limit, offset)
 			end
 		end
 	end
+
+	local need_close = true
+	if response and response.headers then
+		for key, value in pairs(response.headers) do
+			if type(key) == "string" and key:lower() == "connection" then
+				need_close = (tostring(value):lower() ~= "keep-alive")
+				break
+			end
+		end
+	end
+
 	if response.status ~= 200 then
 		ngx.log(ngx.ERR, "OracleDatabase request error: ", response:read_body())
+		if need_close then
+			self:disconnect()
+		end
 		return {error = response.status, list = {}, eof = true}
 	elseif response.headers['Content-Type'] ~= "application/json" then
+		if need_close then
+			self:disconnect()
+		end
 		return {error = -1, list = {}, eof = true}
 	end
 
@@ -438,18 +517,18 @@ function OracleDatabase:collect(name, filter, sort, limit, offset)
 		if body_reader_error then
 			ngx.log(ngx.ERR, "OracleDatabase response reader error: ", body_reader_error)
 			retval.error = 3
+			if need_close then
+				self:disconnect()
+			end
 			return retval
 		elseif buffer then
 			response_body = response_body .. buffer
 		end
 	until not buffer
-
-	local retcode, error = self.client:set_keepalive()
-	if not retcode or retcode ~= 1 then
-		ngx.log(ngx.INFO, "OracleDatabase keepalive error: ", error or "Unknown")
-		self.client = nil
-		self.session = nil
+	if need_close then
+		self:disconnect()
 	end
+
 	if not string.isEmpty(response_body) then
 		response_body = cjson.decode(response_body)
 		if response_body then
@@ -459,6 +538,7 @@ function OracleDatabase:collect(name, filter, sort, limit, offset)
 			end
 			if not retval.eof and fetch_all then
 				offset = #retval.list
+				self:reconnect(false)
 				goto loop
 			end
 		end
