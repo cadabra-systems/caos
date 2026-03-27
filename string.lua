@@ -19,8 +19,16 @@ end
 
 function String.split(input, delimiter)
 	local retval = {}
-	for part in string.gmatch(input, "[^" .. delimiter .. "]+") do
-		table.insert(retval, part)
+	local offset = 1
+	local length = #delimiter
+	while true do
+		local i = string.find(input, delimiter, offset, true)
+		if not i then
+			table.insert(retval, input:sub(offset))
+			break
+		end
+		table.insert(retval, input:sub(offset, i - 1))
+		offset = i + length
 	end
 	return retval
 end
