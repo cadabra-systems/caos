@@ -1,6 +1,6 @@
 local ngx = require "ngx"
 local cjson = require "cjson"
-local http = require "resty.http"
+local http = require "caos.http"
 local string = require "caos.string"
 local url = require "caos.url"
 
@@ -81,7 +81,7 @@ function OracleDatabase:connect()
 		}
 	)
 	if not retcode or error then
-		ngx.log(ngx.ERR, "OracleDatabase connect to ", self.hostname..":"..tostring(self.hostport), " error: ", error or "Unknown")
+		ngx.log(ngx.ERR, "OracleDatabase connect to ", self.hostname..":"..tostring(self.hostport), self.client.egress_proxy and (" via "..http.SafeAddress(self.client.egress_proxy)) or "", " error: ", error or "Unknown")
 		self.session = nil
 		return false
 	end
